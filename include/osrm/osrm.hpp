@@ -39,6 +39,7 @@ namespace osrm
 {
 namespace json = util::json;
 using engine::EngineConfig;
+using engine::api::ClosestFacilityParameters;
 using engine::api::MatchParameters;
 using engine::api::NearestParameters;
 using engine::api::RouteParameters;
@@ -57,6 +58,7 @@ using engine::api::TripParameters;
  *  - Trip: shortest round trip between coordinates
  *  - Match: snaps noisy coordinate traces to the road network
  *  - Tile: vector tiles with internal graph representation
+ *  - ClosestFacility: find the closest facility from a set for each query point
  *
  *  All services take service-specific parameters, fill a JSON object, and return a status code.
  */
@@ -136,6 +138,17 @@ class OSRM final
      */
     Status Tile(const TileParameters &parameters, std::string &result) const;
     Status Tile(const TileParameters &parameters, engine::api::ResultT &result) const;
+
+    /**
+     * ClosestFacility: find the closest facility from a set for each query point
+     *
+     * \param parameters closest facility query specific parameters
+     * \return Status indicating success for the query or failure
+     * \see Status, ClosestFacilityParameters and json::Object
+     */
+    Status ClosestFacility(const ClosestFacilityParameters &parameters, json::Object &result) const;
+    Status ClosestFacility(const ClosestFacilityParameters &parameters,
+                          engine::api::ResultT &result) const;
 
   private:
     std::unique_ptr<engine::EngineInterface> engine_;

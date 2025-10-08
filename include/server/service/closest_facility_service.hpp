@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2017, Project OSRM contributors
+Copyright (c) 2025, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -25,36 +25,32 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#ifndef OSRM_FWD_HPP
-#define OSRM_FWD_HPP
+#ifndef SERVER_SERVICE_CLOSEST_FACILITY_SERVICE_HPP
+#define SERVER_SERVICE_CLOSEST_FACILITY_SERVICE_HPP
 
-// OSRM API forward declarations for usage in interfaces. Exposes forward declarations for:
-// osrm::util::json::Object, osrm::engine::api::XParameters
+#include "server/service/base_service.hpp"
 
-namespace osrm
+#include "engine/status.hpp"
+#include "osrm/osrm.hpp"
+#include "util/coordinate.hpp"
+
+#include <string>
+
+namespace osrm::server::service
 {
 
-namespace util::json
+class ClosestFacilityService final : public BaseService
 {
-struct Object;
-} // namespace util::json
+  public:
+    ClosestFacilityService(OSRM &routing_machine) : BaseService(routing_machine) {}
 
-namespace engine
-{
-namespace api
-{
-struct RouteParameters;
-struct TableParameters;
-struct NearestParameters;
-struct TripParameters;
-struct MatchParameters;
-struct TileParameters;
-struct ClosestFacilityParameters;
-} // namespace api
+    engine::Status RunQuery(std::size_t prefix_length,
+                           std::string &query,
+                           osrm::engine::api::ResultT &result) final override;
 
-class EngineInterface;
-struct EngineConfig;
-} // namespace engine
-} // namespace osrm
+    unsigned GetVersion() final override { return 1; }
+};
 
-#endif
+} // namespace osrm::server::service
+
+#endif // SERVER_SERVICE_CLOSEST_FACILITY_SERVICE_HPP

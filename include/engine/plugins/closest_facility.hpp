@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2017, Project OSRM contributors
+Copyright (c) 2025, Project OSRM contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -25,36 +25,31 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#ifndef OSRM_FWD_HPP
-#define OSRM_FWD_HPP
+#ifndef CLOSEST_FACILITY_HPP
+#define CLOSEST_FACILITY_HPP
 
-// OSRM API forward declarations for usage in interfaces. Exposes forward declarations for:
-// osrm::util::json::Object, osrm::engine::api::XParameters
+#include "engine/plugins/plugin_base.hpp"
+#include "engine/api/closest_facility_parameters.hpp"
+#include "engine/routing_algorithms.hpp"
+#include "util/json_container.hpp"
 
-namespace osrm
+namespace osrm::engine::plugins
 {
 
-namespace util::json
+class ClosestFacilityPlugin final : public BasePlugin
 {
-struct Object;
-} // namespace util::json
+  public:
+    explicit ClosestFacilityPlugin(const int max_locations_distance_table,
+                                   const std::optional<double> default_radius);
 
-namespace engine
-{
-namespace api
-{
-struct RouteParameters;
-struct TableParameters;
-struct NearestParameters;
-struct TripParameters;
-struct MatchParameters;
-struct TileParameters;
-struct ClosestFacilityParameters;
-} // namespace api
+    Status HandleRequest(const RoutingAlgorithmsInterface &algorithms,
+                        const api::ClosestFacilityParameters &params,
+                        osrm::engine::api::ResultT &result) const;
 
-class EngineInterface;
-struct EngineConfig;
-} // namespace engine
-} // namespace osrm
+  private:
+    const int max_locations_distance_table;
+};
 
-#endif
+} // namespace osrm::engine::plugins
+
+#endif // CLOSEST_FACILITY_HPP

@@ -12,6 +12,8 @@ osrm-deps
 *.exe
 *.o
 *.so
+*.pbf
+*.osrm.*
 
 # Packages #
 ############

@@ -3,6 +3,7 @@
 #include "parameters_io.hpp"
 
 #include "engine/api/base_parameters.hpp"
+#include "engine/api/closest_facility_parameters.hpp"
 #include "engine/api/match_parameters.hpp"
 #include "engine/api/nearest_parameters.hpp"
 #include "engine/api/route_parameters.hpp"
@@ -37,6 +38,7 @@ BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<double>)
 BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<osrm::engine::Approach>)
 BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<osrm::engine::Bearing>)
 BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<bool>)
+BOOST_TEST_DONT_PRINT_LOG_VALUE(osrm::engine::api::ClosestFacilityParameters::AnnotationsType)
 
 BOOST_AUTO_TEST_SUITE(api_parameters_parser)
 
@@ -821,6 +823,116 @@ BOOST_AUTO_TEST_CASE(valid_trip_urls)
     BOOST_CHECK_EQUAL(param_fail_1, 15UL);
     auto param_fail_2 = testInvalidOptions<TripParameters>("1,2;3,4?source=first&destination=nah");
     BOOST_CHECK_EQUAL(param_fail_2, 33UL);
+}
+
+BOOST_AUTO_TEST_CASE(invalid_closest_facility_urls)
+{
+    // Invalid coordinates
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("a;3,4?facility_ids=f1"), 0UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("120;3,4?facility_ids=f1"), 3UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("90000000,2;3,4?facility_ids=f1"), 0UL);
+    
+    // Invalid annotations
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&annotations=foo"), 36UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&annotations="), 36UL);
+    
+    // Invalid radiuses
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&radiuses=foo"), 33UL);
+    
+    // Invalid bearings
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&bearings=foo"), 33UL);
+    
+    // Invalid approaches
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&approaches=foo"), 35UL);
+    
+    // Invalid hints
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&hints=foo"), 30UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&hints=;;; ;"), 33UL);
+    
+    // Invalid generate_hints
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&generate_hints=notboolean"), 39UL);
+    
+    // Invalid skip_waypoints
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&skip_waypoints=notboolean"), 39UL);
+    
+    // Empty facility_ids
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids="), 21UL);
+    
+    // Unknown parameter
+    BOOST_CHECK_EQUAL(testInvalidOptions<ClosestFacilityParameters>("1,2;3,4?facility_ids=f1&bla=foo"), 23UL);
+}
+
+BOOST_AUTO_TEST_CASE(valid_closest_facility_urls)
+{
+    std::vector<util::Coordinate> coords_1 = {
+        {util::FloatLongitude{1}, util::FloatLatitude{2}},
+        {util::FloatLongitude{3}, util::FloatLatitude{4}},
+        {util::FloatLongitude{5}, util::FloatLatitude{6}}
+    };
+
+    // Basic valid request with 1 facility, 2 queries
+    ClosestFacilityParameters reference_1{};
+    reference_1.coordinates = coords_1;
+    reference_1.facility_ids = {"facility_1"};
+    auto result_1 = parseParameters<ClosestFacilityParameters>("1,2;3,4;5,6?facility_ids=facility_1");
+    BOOST_CHECK(result_1);
+    BOOST_CHECK_EQUAL(reference_1.annotations, result_1->annotations);
+    BOOST_CHECK_EQUAL(reference_1.skip_waypoints, result_1->skip_waypoints);
+    CHECK_EQUAL_RANGE(reference_1.facility_ids, result_1->facility_ids);
+    CHECK_EQUAL_RANGE(reference_1.coordinates, result_1->coordinates);
+    CHECK_EQUAL_RANGE(reference_1.bearings, result_1->bearings);
+    CHECK_EQUAL_RANGE(reference_1.radiuses, result_1->radiuses);
+    CHECK_EQUAL_RANGE(reference_1.approaches, result_1->approaches);
+
+    // Multiple facility_ids
+    ClosestFacilityParameters reference_2{};
+    reference_2.coordinates = coords_1;
+    reference_2.facility_ids = {"facility_1", "facility_2"};
+    reference_2.annotations = ClosestFacilityParameters::AnnotationsType::All;
+    auto result_2 = parseParameters<ClosestFacilityParameters>("1,2;3,4;5,6?facility_ids=facility_1,facility_2&annotations=distance,duration");
+    BOOST_CHECK(result_2);
+    BOOST_CHECK_EQUAL(reference_2.annotations, result_2->annotations);
+    CHECK_EQUAL_RANGE(reference_2.facility_ids, result_2->facility_ids);
+    CHECK_EQUAL_RANGE(reference_2.coordinates, result_2->coordinates);
+
+    // With only distance annotation
+    ClosestFacilityParameters reference_3{};
+    reference_3.coordinates = coords_1;
+    reference_3.facility_ids = {"f1"};
+    reference_3.annotations = ClosestFacilityParameters::AnnotationsType::Distance;
+    auto result_3 = parseParameters<ClosestFacilityParameters>("1,2;3,4;5,6?facility_ids=f1&annotations=distance");
+    BOOST_CHECK(result_3);
+    BOOST_CHECK_EQUAL(reference_3.annotations, result_3->annotations);
+    CHECK_EQUAL_RANGE(reference_3.facility_ids, result_3->facility_ids);
+
+    // With only duration annotation
+    ClosestFacilityParameters reference_4{};
+    reference_4.coordinates = coords_1;
+    reference_4.facility_ids = {"f1"};
+    reference_4.annotations = ClosestFacilityParameters::AnnotationsType::Duration;
+    auto result_4 = parseParameters<ClosestFacilityParameters>("1,2;3,4;5,6?facility_ids=f1&annotations=duration");
+    BOOST_CHECK(result_4);
+    BOOST_CHECK_EQUAL(reference_4.annotations, result_4->annotations);
+    CHECK_EQUAL_RANGE(reference_4.facility_ids, result_4->facility_ids);
+
+    // With skip_waypoints
+    ClosestFacilityParameters reference_5{};
+    reference_5.coordinates = coords_1;
+    reference_5.facility_ids = {"f1"};
+    reference_5.skip_waypoints = true;
+    auto result_5 = parseParameters<ClosestFacilityParameters>("1,2;3,4;5,6?facility_ids=f1&skip_waypoints=true");
+    BOOST_CHECK(result_5);
+    BOOST_CHECK_EQUAL(reference_5.skip_waypoints, result_5->skip_waypoints);
+    CHECK_EQUAL_RANGE(reference_5.facility_ids, result_5->facility_ids);
+
+    // With generate_hints=false
+    ClosestFacilityParameters reference_6{};
+    reference_6.coordinates = coords_1;
+    reference_6.facility_ids = {"f1"};
+    reference_6.generate_hints = false;
+    auto result_6 = parseParameters<ClosestFacilityParameters>("1,2;3,4;5,6?facility_ids=f1&generate_hints=false");
+    BOOST_CHECK(result_6);
+    BOOST_CHECK_EQUAL(reference_6.generate_hints, result_6->generate_hints);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

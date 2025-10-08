@@ -1,0 +1,34 @@
+[project]
+name = "osrm-backend"
+version = "5.28.0"
+description = "Open Source Routing Machine - High performance routing engine"
+authors = ["OSRM Team"]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64", "linux-64"]
+
+[tasks]
+configure = "cmake -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CONAN=OFF -DENABLE_LTO=OFF -DTBB_ROOT=$CONDA_PREFIX"
+build = "cmake --build build --parallel"
+clean = "rm -rf build"
+test-server = "build/osrm-routed --algorithm mld"
+
+[dependencies]
+cmake = ">=3.18"
+cxx-compiler = "*"
+boost-cpp = ">=1.70"
+tbb-devel = ">=2020.0"
+lua = ">=5.3"
+libxml2 = "*"
+zlib = "*"
+bzip2 = "*"
+expat = "*"
+pkg-config = "*"
+
+[feature.dev.dependencies]
+clang-format = "*"
+clang-tools = "*"
+gdb = { version = "*", channel = "conda-forge" }
+
+[environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
