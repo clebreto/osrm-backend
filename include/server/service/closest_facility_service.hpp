@@ -48,6 +48,10 @@ class ClosestFacilityService final : public BaseService
                            std::string &query,
                            osrm::engine::api::ResultT &result) final override;
 
+    // New: Handle POST requests with JSON body for bulk operations
+    engine::Status RunQueryJSON(const std::string &json_body,
+                               osrm::engine::api::ResultT &result);
+
     unsigned GetVersion() final override { return 1; }
 };
 

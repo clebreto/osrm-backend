@@ -4,6 +4,8 @@
 #include "server/http/header.hpp"
 #include "server/http/request.hpp"
 
+#include "util/log.hpp"
+
 #include <boost/algorithm/string/predicate.hpp>
 
 namespace osrm::server
@@ -11,9 +13,24 @@ namespace osrm::server
 
 RequestParser::RequestParser()
     : state(internal_state::method_start), current_header({"", ""}),
-      selected_compression(http::no_compression)
+      selected_compression(http::no_compression), body_bytes_read(0)
 {
 }
+
+namespace
+{
+// Debug helper to log parsing progress
+void log_parse_progress(const char *state_name, std::size_t bytes_read, std::size_t total_expected)
+{
+    static std::size_t last_log = 0;
+    // Log every 100KB to avoid flooding
+    if (bytes_read == 0 || (bytes_read - last_log >= 100000) || bytes_read == total_expected)
+    {
+        osrm::util::Log(logDEBUG) << "[parser] " << state_name << ": " << bytes_read << "/" << total_expected << " bytes";
+        last_log = bytes_read;
+    }
+}
+} // namespace
 
 std::tuple<RequestParser::RequestStatus, http::compression_type>
 RequestParser::parse(http::request &current_request, char *begin, char *end)
@@ -42,6 +59,7 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
             return RequestStatus::invalid;
         }
         state = internal_state::method;
+        current_request.method.push_back(input);
         return RequestStatus::indeterminate;
     case internal_state::method:
         if (input == ' ')
@@ -53,6 +71,7 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
         {
             return RequestStatus::invalid;
         }
+        current_request.method.push_back(input);
         return RequestStatus::indeterminate;
     case internal_state::uri_start:
         if (is_CTL(input))
@@ -181,6 +200,24 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
             current_request.connection = current_header.value;
         }
 
+        if (boost::iequals(current_header.name, "Content-Type"))
+        {
+            current_request.content_type = current_header.value;
+        }
+
+        if (boost::iequals(current_header.name, "Content-Length"))
+        {
+            try
+            {
+                current_request.content_length = std::stoull(current_header.value);
+                osrm::util::Log(logDEBUG) << "[parser] Content-Length: " << current_request.content_length;
+            }
+            catch (...)
+            {
+                return RequestStatus::invalid;
+            }
+        }
+
         if (input == '\r')
         {
             state = internal_state::expecting_newline_3;
@@ -246,8 +283,38 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
             return RequestStatus::indeterminate;
         }
         return RequestStatus::invalid;
-    default: // expecting_newline_3
-        return input == '\n' ? RequestStatus::valid : RequestStatus::invalid;
+    case internal_state::expecting_newline_3:
+        if (input == '\n')
+        {
+            // Headers complete, check if we need to read body
+            if (current_request.content_length > 0)
+            {
+                state = internal_state::body_start;
+                body_bytes_read = 0;
+                current_request.body.reserve(current_request.content_length);
+                osrm::util::Log(logDEBUG) << "[parser] Starting body read, expected: " 
+                                   << current_request.content_length << " bytes";
+                return RequestStatus::indeterminate;
+            }
+            return RequestStatus::valid;
+        }
+        return RequestStatus::invalid;
+    case internal_state::body_start:
+        // Read body bytes
+        current_request.body.push_back(input);
+        body_bytes_read++;
+        
+        // Log progress periodically
+        log_parse_progress("body", body_bytes_read, current_request.content_length);
+        
+        if (body_bytes_read >= current_request.content_length)
+        {
+            osrm::util::Log(logDEBUG) << "[parser] Body read complete: " << body_bytes_read << " bytes";
+            return RequestStatus::valid;
+        }
+        return RequestStatus::indeterminate;
+    default:
+        return RequestStatus::invalid;
     }
 }
 

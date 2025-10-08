@@ -148,6 +148,10 @@ wget http://download.geofabrik.de/europe/france-latest.osm.pbf
 
 The server will start on port 4000 (port 5000 is typically used by macOS AirPlay Receiver).
 
+## API Usage - GET Endpoint (URL-based)
+
+For small numbers of facilities and query points, use the GET endpoint.
+
 ## Testing the API
 
 ### Basic Test
@@ -170,6 +174,84 @@ curl "http://localhost:4000/closest_facility/v1/car/2.3522,48.8566;2.3387,48.860
 # Find travel time from fire station to multiple emergency sites in Paris
 curl "http://localhost:4000/closest_facility/v1/car/2.3522,48.8566;2.3387,48.8606;2.3488,48.8738?facility_ids=fire_station_paris_1&annotations=duration"
 ```
+
+## API Usage - POST Endpoint (JSON-based for Bulk Operations)
+
+**For large datasets with hundreds of facilities and thousands of query points**, use the POST endpoint with JSON payload.
+
+### Starting the POST Wrapper
+
+```bash
+# Start the POST API wrapper (requires Python 3)
+python3 scripts/closest_facility_post_wrapper.py --osrm-port 4000 --port 8000
+```
+
+### POST Request Format
+
+```json
+{
+  "facilities": [
+    {"id": "facility_1", "lon": 2.3522, "lat": 48.8566},
+    {"id": "facility_2", "lon": 2.3387, "lat": 48.8606}
+  ],
+  "query_points": [
+    {"lon": 2.3200, "lat": 48.8400},
+    {"lon": 2.3700, "lat": 48.8500}
+  ],
+  "annotations": "distance,duration"
+}
+```
+
+### POST Example
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "facilities": [
+      {"id": "hospital_pitie", "lon": 2.3522, "lat": 48.8566},
+      {"id": "hospital_stlouis", "lon": 2.3387, "lat": 48.8606}
+    ],
+    "query_points": [
+      {"lon": 2.3200, "lat": 48.8400},
+      {"lon": 2.3700, "lat": 48.8500}
+    ],
+    "annotations": "distance,duration"
+  }' \
+  http://localhost:8000/closest_facility
+```
+
+### POST Response (Concise Format)
+
+```json
+{
+  "code": "Ok",
+  "results": [
+    {
+      "location": [2.320332, 48.839832],
+      "distance": 4292.0,
+      "duration": 736.3,
+      "facility_id": "hospital_stlouis"
+    },
+    {
+      "location": [2.369848, 48.849989],
+      "distance": 2536.8,
+      "duration": 434.0,
+      "facility_id": "hospital_pitie"
+    }
+  ]
+}
+```
+
+### GET vs POST Comparison
+
+| Feature | GET Endpoint | POST Endpoint |
+|---------|-------------|---------------|
+| **Best for** | Small queries | Bulk operations |
+| **Max practical size** | ~20 facilities, ~100 queries | 100+ facilities, 1000+ queries |
+| **Request format** | URL parameters | JSON body |
+| **Response format** | Full (with metadata) | Concise (minimal) |
+| **Response size** | ~1 KB/result | ~150 bytes/result |
 
 ## Implementation Details
 
