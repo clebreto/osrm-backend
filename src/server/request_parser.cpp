@@ -4,8 +4,6 @@
 #include "server/http/header.hpp"
 #include "server/http/request.hpp"
 
-#include "util/log.hpp"
-
 #include <boost/algorithm/string/predicate.hpp>
 
 namespace osrm::server
@@ -13,24 +11,9 @@ namespace osrm::server
 
 RequestParser::RequestParser()
     : state(internal_state::method_start), current_header({"", ""}),
-      selected_compression(http::no_compression), body_bytes_read(0)
+      selected_compression(http::no_compression), method_string()
 {
 }
-
-namespace
-{
-// Debug helper to log parsing progress
-void log_parse_progress(const char *state_name, std::size_t bytes_read, std::size_t total_expected)
-{
-    static std::size_t last_log = 0;
-    // Log every 100KB to avoid flooding
-    if (bytes_read == 0 || (bytes_read - last_log >= 100000) || bytes_read == total_expected)
-    {
-        osrm::util::Log(logDEBUG) << "[parser] " << state_name << ": " << bytes_read << "/" << total_expected << " bytes";
-        last_log = bytes_read;
-    }
-}
-} // namespace
 
 std::tuple<RequestParser::RequestStatus, http::compression_type>
 RequestParser::parse(http::request &current_request, char *begin, char *end)
@@ -58,12 +41,26 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
         {
             return RequestStatus::invalid;
         }
+        method_string.clear();
+        method_string.push_back(input);
         state = internal_state::method;
-        current_request.method.push_back(input);
         return RequestStatus::indeterminate;
     case internal_state::method:
         if (input == ' ')
         {
+            // Determine method type
+            if (method_string == "GET")
+            {
+                current_request.method = http::request::method_type::GET;
+            }
+            else if (method_string == "POST")
+            {
+                current_request.method = http::request::method_type::POST;
+            }
+            else
+            {
+                current_request.method = http::request::method_type::UNKNOWN;
+            }
             state = internal_state::uri;
             return RequestStatus::indeterminate;
         }
@@ -71,7 +68,7 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
         {
             return RequestStatus::invalid;
         }
-        current_request.method.push_back(input);
+        method_string.push_back(input);
         return RequestStatus::indeterminate;
     case internal_state::uri_start:
         if (is_CTL(input))
@@ -210,7 +207,6 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
             try
             {
                 current_request.content_length = std::stoull(current_header.value);
-                osrm::util::Log(logDEBUG) << "[parser] Content-Length: " << current_request.content_length;
             }
             catch (...)
             {
@@ -284,32 +280,27 @@ RequestParser::RequestStatus RequestParser::consume(http::request &current_reque
         }
         return RequestStatus::invalid;
     case internal_state::expecting_newline_3:
-        if (input == '\n')
+        if (input != '\n')
         {
-            // Headers complete, check if we need to read body
-            if (current_request.content_length > 0)
-            {
-                state = internal_state::body_start;
-                body_bytes_read = 0;
-                current_request.body.reserve(current_request.content_length);
-                osrm::util::Log(logDEBUG) << "[parser] Starting body read, expected: " 
-                                   << current_request.content_length << " bytes";
-                return RequestStatus::indeterminate;
-            }
-            return RequestStatus::valid;
+            return RequestStatus::invalid;
         }
-        return RequestStatus::invalid;
-    case internal_state::body_start:
-        // Read body bytes
-        current_request.body.push_back(input);
-        body_bytes_read++;
-        
-        // Log progress periodically
-        log_parse_progress("body", body_bytes_read, current_request.content_length);
-        
-        if (body_bytes_read >= current_request.content_length)
+        // Headers complete - check if we need to read body
+        if (current_request.method == http::request::method_type::POST &&
+            current_request.content_length > 0)
         {
-            osrm::util::Log(logDEBUG) << "[parser] Body read complete: " << body_bytes_read << " bytes";
+            // Reserve space for body and switch to body reading state
+            current_request.body.reserve(current_request.content_length);
+            state = internal_state::body_reading;
+            return RequestStatus::indeterminate;
+        }
+        // No body expected, request is complete
+        return RequestStatus::valid;
+    case internal_state::body_reading:
+        // Accumulate body data
+        current_request.body.push_back(input);
+        if (current_request.body.size() >= current_request.content_length)
+        {
+            // Body complete
             return RequestStatus::valid;
         }
         return RequestStatus::indeterminate;

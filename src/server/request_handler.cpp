@@ -92,36 +92,71 @@ void RequestHandler::HandleRequest(const http::request &current_request, http::r
         std::string request_string;
         util::URIDecode(current_request.uri, request_string);
 
-        util::Log(logDEBUG) << "[req][" << tid << "] " << current_request.method << " "
-                            << request_string;
+        util::Log(logDEBUG) << "[req][" << tid << "] " 
+                           << (current_request.method == http::request::method_type::POST ? "POST " : "GET ")
+                           << request_string;
 
-        // Check if this is a POST request to /closest_facility
-        if (current_request.method == "POST" && 
-            request_string.find("/closest_facility/") == 0)
+        ServiceHandler::ResultT result;
+
+        // Handle POST requests differently
+        if (current_request.method == http::request::method_type::POST)
         {
-            util::Log(logDEBUG) << "[req][" << tid << "] POST request, body size: " 
-                               << current_request.body.size() << " bytes";
-            
-            // For POST requests, we just need to extract the service name
-            // The body contains all the data
-            ServiceHandler::ResultT result;
-            
-            // Extract service name (always "closest_facility" for this path)
-            auto status = service_handler->RunQueryJSON("closest_facility", current_request.body, result);
-            
-            if (status != engine::Status::Ok)
-            {
-                current_reply.status = http::reply::bad_request;
-            }
-            
-            SendResponse(result, current_reply);
-        }
-        else
-        {
-            // Handle GET requests as before
+            // For POST, parse the URL to get service name and version
             auto api_iterator = request_string.begin();
             auto maybe_parsed_url = api::parseURL(api_iterator, request_string.end());
-            ServiceHandler::ResultT result;
+
+            if (maybe_parsed_url && api_iterator == request_string.end())
+            {
+                // Validate Content-Type
+                if (current_request.content_type.find("application/json") == std::string::npos)
+                {
+                    current_reply.status = http::reply::bad_request;
+                    result = util::json::Object();
+                    auto &json_result = std::get<util::json::Object>(result);
+                    json_result.values["code"] = "InvalidContentType";
+                    json_result.values["message"] = "POST requests must have Content-Type: application/json";
+                }
+                else
+                {
+                    const engine::Status status =
+                        service_handler->RunQueryJSON(*std::move(maybe_parsed_url), 
+                                                     current_request.body, 
+                                                     result);
+                    if (status != engine::Status::Ok)
+                    {
+                        // 4xx bad request return code
+                        current_reply.status = http::reply::bad_request;
+                    }
+                    else
+                    {
+                        BOOST_ASSERT(status == engine::Status::Ok);
+                    }
+                }
+            }
+            else
+            {
+                const auto position = std::distance(request_string.begin(), api_iterator);
+                BOOST_ASSERT(position >= 0);
+                const auto context_begin =
+                    request_string.begin() + ((position < 3) ? 0 : (position - 3UL));
+                BOOST_ASSERT(context_begin >= request_string.begin());
+                const auto context_end = request_string.begin() +
+                                         std::min<std::size_t>(position + 3UL, request_string.size());
+                BOOST_ASSERT(context_end <= request_string.end());
+                std::string context(context_begin, context_end);
+
+                current_reply.status = http::reply::bad_request;
+                result = util::json::Object();
+                auto &json_result = std::get<util::json::Object>(result);
+                json_result.values["code"] = "InvalidUrl";
+                json_result.values["message"] = "URL string malformed close to position " +
+                                                std::to_string(position) + ": \"" + context + "\"";
+            }
+        }
+        else // GET request
+        {
+            auto api_iterator = request_string.begin();
+            auto maybe_parsed_url = api::parseURL(api_iterator, request_string.end());
 
             // check if the was an error with the request
             if (maybe_parsed_url && api_iterator == request_string.end())
@@ -158,9 +193,9 @@ void RequestHandler::HandleRequest(const http::request &current_request, http::r
                 json_result.values["message"] = "URL string malformed close to position " +
                                                 std::to_string(position) + ": \"" + context + "\"";
             }
-
-            SendResponse(result, current_reply);
         }
+
+        SendResponse(result, current_reply);
 
         if (!std::getenv("DISABLE_ACCESS_LOGGING"))
         {

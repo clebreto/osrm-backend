@@ -62,12 +62,12 @@ class RequestParser
         header_value,
         expecting_newline_2,
         expecting_newline_3,
-        body_start
+        body_reading  // New state for reading POST body
     } state;
 
     http::header current_header;
     http::compression_type selected_compression;
-    std::size_t body_bytes_read = 0;
+    std::string method_string;  // Store method string (GET/POST)
 };
 } // namespace osrm::server
 
