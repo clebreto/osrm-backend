@@ -11,6 +11,12 @@
 #include <boost/property_tree/json_parser.hpp>
 
 #include <sstream>
+#include <future>
+#include <vector>
+#include <thread>
+#include <algorithm>
+#include <atomic>
+#include <mutex>
 
 namespace osrm::server::service
 {
@@ -251,15 +257,15 @@ engine::Status ClosestFacilityService::RunQueryJSON(const std::string &json_body
         const auto num_queries = parameters.query_indices.size();
         const auto total_coordinates = num_facilities + num_queries;
         
-        // Check if we need to batch (assume max_table_size of 5000)
-        const std::size_t MAX_TABLE_SIZE = 5000;
+        // Reduce batch size for better parallelism
+        // Original limit was 5000, but we use smaller batches for parallelism
+        const std::size_t MAX_TABLE_SIZE = 5000;  // Must be > max expected facilities
+        const std::size_t MAX_PARALLEL_BATCHES = std::min(std::thread::hardware_concurrency(), 8u);
         
         if (total_coordinates > MAX_TABLE_SIZE)
         {
-            // Need to batch queries (keep all facilities in each batch)
-            const std::size_t queries_per_batch = MAX_TABLE_SIZE - num_facilities;
-            
-            if (queries_per_batch < 1)
+            // Check if facilities alone exceed the limit
+            if (num_facilities >= MAX_TABLE_SIZE)
             {
                 json_result.values["code"] = "InvalidOptions";
                 json_result.values["message"] = "Too many facilities (" + std::to_string(num_facilities) + 
@@ -267,106 +273,163 @@ engine::Status ClosestFacilityService::RunQueryJSON(const std::string &json_body
                 return engine::Status::Error;
             }
             
-            // Process in batches
-            util::json::Array all_results;
-            std::size_t query_offset = 0;
-            std::size_t batch_count = 0;
+            // Need to batch queries (keep all facilities in each batch)
+            const std::size_t queries_per_batch = MAX_TABLE_SIZE - num_facilities;
             
-            while (query_offset < num_queries)
+            // Calculate number of batches
+            const std::size_t num_batches = (num_queries + queries_per_batch - 1) / queries_per_batch;
+            
+            // Process batches in parallel
+            util::json::Array all_results;
+            all_results.values.resize(num_queries);  // Pre-allocate for thread safety
+            
+            // Use a mutex-protected vector for batch results since util::json::Object is complex
+            std::mutex results_mutex;
+            std::vector<std::future<std::pair<engine::Status, engine::api::ResultT>>> futures;
+            
+            // Process batches in parallel groups
+            for (std::size_t batch_start = 0; batch_start < num_batches; batch_start += MAX_PARALLEL_BATCHES)
             {
-                batch_count++;
-                const std::size_t batch_size = std::min(queries_per_batch, num_queries - query_offset);
+                futures.clear();
+                const std::size_t batch_end = std::min(batch_start + MAX_PARALLEL_BATCHES, num_batches);
                 
-                // Create batch parameters
-                engine::api::ClosestFacilityParameters batch_params;
-                batch_params.annotations = parameters.annotations;
-                
-                // Add all facilities
-                for (std::size_t i = 0; i < num_facilities; ++i)
+                // Launch parallel batch processing
+                for (std::size_t batch_idx = batch_start; batch_idx < batch_end; ++batch_idx)
                 {
-                    const auto fac_idx = parameters.facility_indices[i];
-                    batch_params.coordinates.push_back(parameters.coordinates[fac_idx]);
-                    batch_params.facility_indices.push_back(i);
-                    batch_params.facility_ids.push_back(parameters.facility_ids[i]);
+                    const std::size_t query_offset = batch_idx * queries_per_batch;
+                    const std::size_t batch_size = std::min(queries_per_batch, num_queries - query_offset);
+                    
+                    // Launch async batch processing - capture by value to avoid race conditions
+                    futures.push_back(std::async(std::launch::async, 
+                        [this, parameters, num_facilities, query_offset, batch_size, batch_idx]() 
+                        -> std::pair<engine::Status, engine::api::ResultT> {
+                        
+                        try {
+                            // Create batch parameters
+                            engine::api::ClosestFacilityParameters batch_params;
+                            batch_params.annotations = parameters.annotations;
+                            
+                            // Add all facilities
+                            for (std::size_t i = 0; i < num_facilities; ++i)
+                            {
+                                const auto fac_idx = parameters.facility_indices[i];
+                                batch_params.coordinates.push_back(parameters.coordinates[fac_idx]);
+                                batch_params.facility_indices.push_back(i);
+                                batch_params.facility_ids.push_back(parameters.facility_ids[i]);
+                            }
+                            
+                            // Add batch of queries
+                            for (std::size_t i = 0; i < batch_size; ++i)
+                            {
+                                const auto query_idx = parameters.query_indices[query_offset + i];
+                                batch_params.coordinates.push_back(parameters.coordinates[query_idx]);
+                                batch_params.query_indices.push_back(num_facilities + i);
+                            }
+                            
+                            // Process this batch
+                            engine::api::ResultT batch_result;
+                            auto status = BaseService::routing_machine.ClosestFacility(batch_params, batch_result);
+                            
+                            return {status, std::move(batch_result)};
+                            
+                        } catch (const std::exception &e) {
+                            util::json::Object error_obj;
+                            error_obj.values["code"] = "Exception";
+                            error_obj.values["message"] = std::string("Exception in batch ") + 
+                                std::to_string(batch_idx + 1) + ": " + e.what();
+                            return {engine::Status::Error, error_obj};
+                        }
+                    }));
                 }
                 
-                // Add batch of queries
-                for (std::size_t i = 0; i < batch_size; ++i)
+                // Wait for this group of batches to complete and collect results
+                for (std::size_t i = 0; i < futures.size(); ++i)
                 {
-                    const auto query_idx = parameters.query_indices[query_offset + i];
-                    batch_params.coordinates.push_back(parameters.coordinates[query_idx]);
-                    batch_params.query_indices.push_back(num_facilities + i);
-                }
-                
-                // Process this batch
-                engine::api::ResultT batch_result;
-                auto status = BaseService::routing_machine.ClosestFacility(batch_params, batch_result);
-                
-                if (status != engine::Status::Ok)
-                {
-                    json_result.values["code"] = "BatchError";
-                    json_result.values["message"] = "Error processing batch " + std::to_string(batch_count);
+                    const std::size_t batch_idx = batch_start + i;
+                    const std::size_t query_offset = batch_idx * queries_per_batch;
+                    const std::size_t batch_size = std::min(queries_per_batch, num_queries - query_offset);
+                    
+                    auto [status, batch_result] = futures[i].get();
+                    
+                    if (status != engine::Status::Ok)
+                    {
+                        std::string error_msg = "Error processing batch " + std::to_string(batch_idx + 1);
+                        if (std::holds_alternative<util::json::Object>(batch_result))
+                        {
+                            auto &batch_obj = std::get<util::json::Object>(batch_result);
+                            if (batch_obj.values.count("message"))
+                            {
+                                const auto &msg_value = batch_obj.values.at("message");
+                                if (std::holds_alternative<util::json::String>(msg_value))
+                                {
+                                    error_msg += ": " + std::get<util::json::String>(msg_value).value;
+                                }
+                            }
+                        }
+                        json_result.values["code"] = "BatchError";
+                        json_result.values["message"] = error_msg;
+                        return engine::Status::Error;
+                    }
+                    
+                    // Extract results from batch_result and add to all_results
+                    // Apply the same concise format transformation as non-batched path
                     if (std::holds_alternative<util::json::Object>(batch_result))
                     {
                         auto &batch_obj = std::get<util::json::Object>(batch_result);
-                        if (batch_obj.values.count("message"))
+                        if (batch_obj.values.count("results"))
                         {
-                            json_result.values["batch_error"] = batch_obj.values["message"];
-                        }
-                    }
-                    return status;
-                }
-                
-                // Extract results from this batch
-                if (std::holds_alternative<util::json::Object>(batch_result))
-                {
-                    auto &batch_obj = std::get<util::json::Object>(batch_result);
-                    if (batch_obj.values.count("results"))
-                    {
-                        auto &batch_results = std::get<util::json::Array>(batch_obj.values["results"]);
-                        
-                        for (const auto &res_val : batch_results.values)
-                        {
-                            const auto &res = std::get<util::json::Object>(res_val);
-                            util::json::Object concise_result;
-
-                            // Extract location
-                            if (res.values.count("location"))
+                            auto &batch_results = batch_obj.values.at("results");
+                            if (std::holds_alternative<util::json::Array>(batch_results))
                             {
-                                const auto &loc = std::get<util::json::Object>(res.values.at("location"));
-                                if (loc.values.count("location"))
+                                auto &batch_array = std::get<util::json::Array>(batch_results);
+                                std::size_t result_idx = 0;
+                                for (const auto &res_val : batch_array.values)
                                 {
-                                    concise_result.values["location"] = loc.values.at("location");
+                                    if (result_idx < batch_size)
+                                    {
+                                        // Transform to concise format (same as non-batched path)
+                                        const auto &res = std::get<util::json::Object>(res_val);
+                                        util::json::Object concise_result;
+
+                                        // Extract location
+                                        if (res.values.count("location"))
+                                        {
+                                            const auto &loc = std::get<util::json::Object>(res.values.at("location"));
+                                            if (loc.values.count("location"))
+                                            {
+                                                concise_result.values["location"] = loc.values.at("location");
+                                            }
+                                        }
+
+                                        // Extract distance
+                                        if (res.values.count("distance"))
+                                        {
+                                            concise_result.values["distance"] = res.values.at("distance");
+                                        }
+
+                                        // Extract duration
+                                        if (res.values.count("duration"))
+                                        {
+                                            concise_result.values["duration"] = res.values.at("duration");
+                                        }
+
+                                        // Extract facility_id (rename from closest_facility_id)
+                                        if (res.values.count("closest_facility_id"))
+                                        {
+                                            concise_result.values["facility_id"] = res.values.at("closest_facility_id");
+                                        }
+
+                                        all_results.values[query_offset + result_idx] = concise_result;
+                                        ++result_idx;
+                                    }
                                 }
                             }
-
-                            // Extract distance (if available)
-                            if (res.values.count("distance"))
-                            {
-                                concise_result.values["distance"] = res.values.at("distance");
-                            }
-
-                            // Extract duration (if available)
-                            if (res.values.count("duration"))
-                            {
-                                concise_result.values["duration"] = res.values.at("duration");
-                            }
-
-                            // Extract facility_id
-                            if (res.values.count("closest_facility_id"))
-                            {
-                                concise_result.values["facility_id"] = res.values.at("closest_facility_id");
-                            }
-
-                            all_results.values.push_back(concise_result);
                         }
                     }
                 }
-                
-                query_offset += batch_size;
             }
             
-            // Return batched results
+            // Format final response
             json_result.values["code"] = "Ok";
             json_result.values["results"] = all_results;
             
@@ -374,7 +437,9 @@ engine::Status ClosestFacilityService::RunQueryJSON(const std::string &json_body
             util::json::Object metadata;
             metadata.values["total_facilities"] = util::json::Number(num_facilities);
             metadata.values["total_queries"] = util::json::Number(num_queries);
-            metadata.values["batches_processed"] = util::json::Number(batch_count);
+            metadata.values["batches_processed"] = util::json::Number(num_batches);
+            metadata.values["batch_size"] = util::json::Number(queries_per_batch);
+            metadata.values["parallel_batches"] = util::json::Number(MAX_PARALLEL_BATCHES);
             json_result.values["metadata"] = metadata;
             
             return engine::Status::Ok;
