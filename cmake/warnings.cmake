@@ -49,7 +49,14 @@ endmacro ()
 add_warning(all)
 add_warning(extra)
 add_warning(pedantic)
-add_warning(error) # treat all warnings as errors
+# Keep -Werror everywhere EXCEPT local macOS/AppleClang builds. This pinned fork
+# predates upstream's clang-21 modernization, so newer AppleClang warnings
+# (unnecessary-virtual-specifier, char_traits<const char> deprecation, ...) would
+# otherwise become fatal on developer machines. The deployed Debian Docker build
+# (GCC/older clang) is unaffected and keeps treating warnings as errors.
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    add_warning(error) # treat all warnings as errors
+endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_warning(strict-overflow=1)
 endif()

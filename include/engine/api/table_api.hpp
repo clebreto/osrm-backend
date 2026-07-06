@@ -28,7 +28,7 @@ namespace osrm::engine::api
 class TableAPI final : public BaseAPI
 {
   public:
-    virtual ~TableAPI() = default;
+    ~TableAPI() = default;
 
     struct TableCellRef
     {
@@ -44,7 +44,7 @@ class TableAPI final : public BaseAPI
     {
     }
 
-    virtual void
+    void
     MakeResponse(const std::pair<std::vector<EdgeDuration>, std::vector<EdgeDistance>> &tables,
                  const std::vector<PhantomNodeCandidates> &candidates,
                  const std::vector<TableCellRef> &fallback_speed_cells,
@@ -62,7 +62,7 @@ class TableAPI final : public BaseAPI
         }
     }
 
-    virtual void
+    void
     MakeResponse(const std::pair<std::vector<EdgeDuration>, std::vector<EdgeDistance>> &tables,
                  const std::vector<PhantomNodeCandidates> &candidates,
                  const std::vector<TableCellRef> &fallback_speed_cells,
@@ -165,7 +165,7 @@ class TableAPI final : public BaseAPI
         fb_result.Finish(response.Finish());
     }
 
-    virtual void
+    void
     MakeResponse(const std::pair<std::vector<EdgeDuration>, std::vector<EdgeDistance>> &tables,
                  const std::vector<PhantomNodeCandidates> &candidates,
                  const std::vector<TableCellRef> &fallback_speed_cells,
@@ -238,7 +238,7 @@ class TableAPI final : public BaseAPI
     }
 
   protected:
-    virtual flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fbresult::Waypoint>>>
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fbresult::Waypoint>>>
     MakeWaypoints(flatbuffers::FlatBufferBuilder &builder,
                   const std::vector<PhantomNodeCandidates> &candidates) const
     {
@@ -253,7 +253,7 @@ class TableAPI final : public BaseAPI
         return builder.CreateVector(waypoints);
     }
 
-    virtual flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fbresult::Waypoint>>>
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fbresult::Waypoint>>>
     MakeWaypoints(flatbuffers::FlatBufferBuilder &builder,
                   const std::vector<PhantomNodeCandidates> &candidates,
                   const std::vector<std::size_t> &indices) const
@@ -271,7 +271,7 @@ class TableAPI final : public BaseAPI
         return builder.CreateVector(waypoints);
     }
 
-    virtual flatbuffers::Offset<flatbuffers::Vector<float>>
+    flatbuffers::Offset<flatbuffers::Vector<float>>
     MakeDurationTable(flatbuffers::FlatBufferBuilder &builder,
                       const std::vector<EdgeDuration> &values) const
     {
@@ -291,7 +291,7 @@ class TableAPI final : public BaseAPI
         return builder.CreateVector(distance_table);
     }
 
-    virtual flatbuffers::Offset<flatbuffers::Vector<float>>
+    flatbuffers::Offset<flatbuffers::Vector<float>>
     MakeDistanceTable(flatbuffers::FlatBufferBuilder &builder,
                       const std::vector<EdgeDistance> &values) const
     {
@@ -311,7 +311,7 @@ class TableAPI final : public BaseAPI
         return builder.CreateVector(duration_table);
     }
 
-    virtual flatbuffers::Offset<flatbuffers::Vector<uint32_t>>
+    flatbuffers::Offset<flatbuffers::Vector<uint32_t>>
     MakeEstimatesTable(flatbuffers::FlatBufferBuilder &builder,
                        const std::vector<TableCellRef> &fallback_speed_cells) const
     {
@@ -327,7 +327,7 @@ class TableAPI final : public BaseAPI
         return builder.CreateVector(fb_table);
     }
 
-    virtual util::json::Array
+    util::json::Array
     MakeWaypoints(const std::vector<PhantomNodeCandidates> &candidates) const
     {
         util::json::Array json_waypoints;
@@ -341,7 +341,7 @@ class TableAPI final : public BaseAPI
         return json_waypoints;
     }
 
-    virtual util::json::Array MakeWaypoints(const std::vector<PhantomNodeCandidates> &candidates,
+    util::json::Array MakeWaypoints(const std::vector<PhantomNodeCandidates> &candidates,
                                             const std::vector<std::size_t> &indices) const
     {
         util::json::Array json_waypoints;
@@ -356,7 +356,7 @@ class TableAPI final : public BaseAPI
         return json_waypoints;
     }
 
-    virtual util::json::Array MakeDurationTable(const std::vector<EdgeDuration> &values,
+    util::json::Array MakeDurationTable(const std::vector<EdgeDuration> &values,
                                                 std::size_t number_of_rows,
                                                 std::size_t number_of_columns) const
     {
@@ -386,7 +386,7 @@ class TableAPI final : public BaseAPI
         return json_table;
     }
 
-    virtual util::json::Array MakeDistanceTable(const std::vector<EdgeDistance> &values,
+    util::json::Array MakeDistanceTable(const std::vector<EdgeDistance> &values,
                                                 std::size_t number_of_rows,
                                                 std::size_t number_of_columns) const
     {
@@ -415,7 +415,7 @@ class TableAPI final : public BaseAPI
         return json_table;
     }
 
-    virtual util::json::Array
+    util::json::Array
     MakeEstimatesTable(const std::vector<TableCellRef> &fallback_speed_cells) const
     {
         util::json::Array json_table;
